@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SLAM 机器人控制面板</title>
+    <style>
+        body { margin: 0; padding: 0; background-color: #1e1e1e; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        .header { padding: 10px; text-align: center; background: #333; font-size: 18px; font-weight: bold; }
+        .status { font-size: 14px; color: #ff4c4c; }
+        .status.connected { color: #4cff4c; }
+        .map-container { flex: 1; display: flex; justify-content: center; align-items: center; padding: 10px; background: #000; overflow: hidden; }
+        #slam-map { max-width: 100%; max-height: 100%; object-fit: contain; border: 1px solid #444; }
+        .controls { height: 200px; display: flex; justify-content: space-around; align-items: center; background: #2a2a2a; padding: 10px; box-shadow: 0 -2px 10px rgba(0,0,0,0.5); }
+        .slider-container { display: flex; flex-direction: column; align-items: center; width: 20%; }
+        input[type="range"] { writing-mode: bt-lr; -webkit-appearance: slider-vertical; width: 40px; height: 120px; }
+
+        /* --- 急停按钮样式 --- */
+        .estop-btn {
+            background-color: #e60000;
+            color: white;
+            border: 3px solid #990000;
+            border-radius: 50%;
+            width: 80px;
+            height: 80px;
+            font-size: 18px;
+            font-weight: bold;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            user-select: none; /* 防止长按选中文本 */
+            -webkit-user-select: none;
+            touch-action: manipulation; /* 优化触摸响应 */
+        }
+        .estop-btn:active {
+            background-color: #b30000;
+            box-shadow: inset 0 4px 8px rgba(0,0,0,0.6);
+            transform: scale(0.95);
+        }
+
+        .joystick-container { position: relative; width: 150px; height: 150px; background: #444; border-radius: 50%; box-shadow: inset 0 0 10px rgba(0,0,0,0.8); touch-action: none; }
+        .joystick-knob { position: absolute; width: 60px; height: 60px; background: #007bff; border-radius: 50%; top: 45px; left: 45px; pointer-events: none; box-shadow: 0 4px 8px rgba(0,0,0,0.5); }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        SLAM 机器人控制台 <br>
+        <span id="ws-status" class="status">未连接</span>
+    </div>
+
+    <div class="map-container">
+        <img id="slam-map" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" alt="SLAM Map Waiting...">
+    </div>
+
+    <div class="controls">
+        <div class="slider-container">
+            <label for="speed-slider">最大速度</label>
+            <input type="range" id="speed-slider" min="0" max="100" value="50">
+            <span id="speed-val">50%</span>
+        </div>
+
+        <div class="estop-btn" id="estop">急停</div>
+
+        <div class="joystick-container" id="joystick">
+            <div class="joystick-knob" id="knob"></div>
+        </div>
+    </div>
+
+    <script>
+        // --- WebSocket 设置 ---
+        const WS_URL = "ws://192.168.110.99:8765"; // 保持正确的IP
+        let ws;
+
+        const statusEl = document.getElementById('ws-status');
+        const mapEl = document.getElementById('slam-map');
+
+        function connectWS() {
+            ws = new WebSocket(WS_URL);
+            ws.onopen = () => {
+                statusEl.textContent = "已连接";
+                statusEl.className = "status connected";
+                // 上电瞬间强制刹车
+                sendMotionCommand(0, 0, true);
+            };
+            ws.onclose = () => {
+                statusEl.textContent = "断开连接，重连中...";
+                statusEl.className = "status";
+                setTimeout(connectWS, 2000);
+            };
+            ws.onmessage = (event) => {
+                if (event.data.startsWith('data:image')) {
+                    mapEl.src = event.data;
+                }
+            };
+        }
+        connectWS();
+
+        let currentX = 0;
+        let currentY = 0;
+
+        // --- 速度拉杆逻辑 ---
+        const slider = document.getElementById('speed-slider');
+        const speedVal = document.getElementById('speed-val');
+        let maxSpeed = parseInt(slider.value) / 100.0;
+
+        slider.addEventListener('input', (e) => {
+            speedVal.textContent = e.target.value + '%';
+            maxSpeed = parseInt(e.target.value) / 100.0;
+            sendMotionCommand(currentX, currentY, true);
+        });
+
+        // --- 急停逻辑 (E-Stop) ---
+        const estopBtn = document.getElementById('estop');
+
+        function triggerEstop(e) {
+            if(e) e.preventDefault(); // 阻止浏览器默认行为
+
+            // 1. 摇杆变量与UI归零
+            isDragging = false;
+            currentX = 0;
+            currentY = 0;
+            knob.style.transform = `translate(0px, 0px)`;
+
+            // 2. 速度拉杆变量与UI归零 (双重保险)
+            slider.value = 0;
+            speedVal.textContent = '0%';
+            maxSpeed = 0;
+
+            // 3. 强制无视频率限制，立刻发送停车指令
+            sendMotionCommand(0, 0, true);
+        }
+
+        // 使用 touchstart 和 mousedown 保证手指碰到按钮的第一毫秒就触发，不等待抬起
+        estopBtn.addEventListener('touchstart', triggerEstop);
+        estopBtn.addEventListener('mousedown', triggerEstop);
+
+
+        // --- 摇杆逻辑与运动学解算 ---
+        const joystick = document.getElementById('joystick');
+        const knob = document.getElementById('knob');
+        const maxRadius = 45;
+        let isDragging = false;
+        let lastSendTime = 0;
+
+        function updateJoystick(clientX, clientY) {
+            const rect = joystick.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+
+            let dx = clientX - centerX;
+            let dy = clientY - centerY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            // 摇杆死区：小于 8 像素视为回中
+            if (distance < 8) {
+                dx = 0;
+                dy = 0;
+            } else if (distance > maxRadius) {
+                dx = (dx / distance) * maxRadius;
+                dy = (dy / distance) * maxRadius;
+            }
+
+            knob.style.transform = `translate(${dx}px, ${dy}px)`;
+
+            currentX = dx / maxRadius;
+            currentY = -dy / maxRadius;
+
+            sendMotionCommand(currentX, currentY, false);
+        }
+        let stopTimer = null;
+        function resetJoystick() {
+            knob.style.transform = `translate(0px, 0px)`;
+            currentX = 0;
+            currentY = 0;
+
+            // 清理可能存在的旧定时器
+            if (stopTimer) clearInterval(stopTimer);
+
+            let count = 0;
+            // 采用连发机制：每 20ms 发送一次 0，连续发送 5 次！
+            stopTimer = setInterval(() => {
+                // 【保险机制】：如果在这 100ms 内，你的手又放上去推摇杆了，立刻停止发送刹车
+                if (isDragging) {
+                    clearInterval(stopTimer);
+                    return;
+                }
+
+                // 第四个参数 false 代表这是正常回中，不是按下了急停按钮
+                sendMotionCommand(0, 0, true, false);
+                count++;
+
+                if (count >= 5) {
+                    clearInterval(stopTimer); // 5次发完，功成身退
+                }
+            }, 20);
+        }
+
+        // --- 发送逻辑 ---
+        function sendMotionCommand(x, y, force = false) {
+            let speedRatio = y * maxSpeed;
+            let steerRatio = x;
+
+            const now = Date.now();
+            if (force || (now - lastSendTime > 50)) {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: "cmd",
+                        speed: speedRatio,
+                        steer: steerRatio
+                    }));
+                }
+                lastSendTime = now;
+            }
+        }
+
+        // 触摸事件绑定
+        joystick.addEventListener('touchstart', (e) => { isDragging = true; updateJoystick(e.touches[0].clientX, e.touches[0].clientY); });
+        joystick.addEventListener('touchmove', (e) => { if (isDragging) updateJoystick(e.touches[0].clientX, e.touches[0].clientY); });
+        joystick.addEventListener('touchend', () => { isDragging = false; resetJoystick(); });
+        joystick.addEventListener('touchcancel', () => { isDragging = false; resetJoystick(); });
+
+        // 鼠标事件绑定
+        joystick.addEventListener('mousedown', (e) => { isDragging = true; updateJoystick(e.clientX, e.clientY); });
+        window.addEventListener('mousemove', (e) => { if (isDragging) updateJoystick(e.clientX, e.clientY); });
+        window.addEventListener('mouseup', () => { if (isDragging) { isDragging = false; resetJoystick(); } });
+        window.addEventListener('mouseleave', () => { if (isDragging) { isDragging = false; resetJoystick(); } });
+    </script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+# Build output
+build/
+install/
+
+# Logs
+log/
+
+# ROS2
+*.pyc
+__pycache__/
+*.egg-info/
+.ament_index/
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
