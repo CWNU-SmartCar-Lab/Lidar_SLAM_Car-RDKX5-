@@ -7,7 +7,7 @@
 - [二、环境搭建](#二环境搭建)
 - [三、使用方法](#三使用方法)
 - [四、配置参数](#四配置参数)
-- [五、需要修改的地方](#五需要修改的地方)
+- [五、需要注意的地方](#五需要注意的地方)
 - [六、启动顺序](#六启动顺序)
 - [七、常见问题](#七常见问题)
 - [八、文件索引](#八文件索引)
@@ -219,7 +219,7 @@ ros2 launch ydlidar_ros2_driver ydlidar_launch_view.py
 
 ---
 
-## 五、需要修改的地方
+## 五、需要注意的地方
 
 ### 5.1 串口设备名
 
@@ -232,7 +232,7 @@ ros2 launch ydlidar_ros2_driver ydlidar_launch_view.py
   sudo nano /etc/udev/rules.d/99-ydlidar.rules
   # 添加：SUBSYSTEM=="tty", ATTRS{idVendor}=="xxxx", ATTRS{idProduct}=="xxxx", SYMLINK+="ydlidar"
   ```
-- 方案 2：每次确认设备名
+- 方案 2：每次确认设备名，确认雷达的串口是否正确
   ```bash
   ls -l /dev/ttyUSB*
   ```
