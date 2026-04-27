@@ -7,8 +7,8 @@ import time  # <--- 【关键新增】：导入时间模块
 
 # 配置与STM32连接的串口 (根据RDK X5实际引脚修改)
 try:
-    ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
-    print("串口 /dev/ttyUSB0 打开成功")
+    ser = serial.Serial('/dev/ttyUSB1', 115200, timeout=1)
+    print("串口 /dev/ttyUSB1 打开成功")
 except Exception as e:
     print(f"串口打开失败: {e}")
     ser = None
